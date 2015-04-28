@@ -2,7 +2,9 @@
 # coding=utf-8
 
 """
-Send collected stats to [Kafka](http://kafka.apache.org/) fromated as json.
+Send collected stats to [Kafka](http://kafka.apache.org/) fromated as json
+or [graphite like](https://graphite.readthedocs.org/en/latest/feeding-carbon.html)
+plain text.
 
 Dependency:
 
@@ -18,7 +20,6 @@ host = localhost
 port = 9092
 topic = diamond
 ```
-
 """
 
 from __future__ import absolute_import
@@ -33,6 +34,15 @@ class KafkaHandler(Handler):
     """
     def __init__(self, config = None):
         super(KafkaHandler, self).__init__(config)
+        fmt = self.config['format']
+        if fmt == 'json':
+            self.format = lambda metric: JsonMetric(metric).json()
+        elif fmt == 'graphite':
+            self.format = lambda metric: "%s %s %s" % (metric.path,
+                    metric.value, metric.timestamp)
+        else:
+            self.log.error("Unsupported format `%s', using json", self.format)
+            self.format = lambda metric: JsonMetric(metric).json()
         self.host = self.config['host']
         self.port = int(self.config['port'])
         self.kafka = KafkaClient('%s:%d' % (self.host, self.port))
@@ -46,8 +56,7 @@ class KafkaHandler(Handler):
         Process a metric by doing nothing
         """
         try:
-            metric = JsonMetric(metric)
-            self.producer.send_messages(self.topic, metric.json())
+            self.producer.send_messages(self.topic, self.format(metric))
         except:
             self.log.exception('Faild to send metric to Kafka topic %s at %s %d', 
                     self.topic, self.host, self.port)
@@ -59,6 +68,7 @@ class KafkaHandler(Handler):
         config = super(KafkaHandler, self).get_default_config_help()
 
         config.update({
+            'format': 'Metric format (values: json, graphite)',
             'host': 'Name of kafka server',
             'port': 'Kafka port',
             'topic': 'Kafka topic to publish metrics'
@@ -73,6 +83,7 @@ class KafkaHandler(Handler):
         config = super(KafkaHandler, self).get_default_config()
 
         config.update({
+            'format': 'json',
             'host': 'localhost',
             'port': '9092',
             'topic': 'diamond'
